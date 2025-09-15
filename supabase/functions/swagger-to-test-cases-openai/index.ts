@@ -2,10 +2,14 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from '../_shared/cors.ts';
 
-const openAIApiKey = Deno.env.get('OPENAI_API_KEY');
+const azureApiKey = Deno.env.get('AZURE_OPENAI_API_KEY');
+const azureEndpoint = Deno.env.get('AZURE_OPENAI_ENDPOINT');
+const deploymentName = Deno.env.get('AZURE_OPENAI_DEPLOYMENT_NAME');
 
 console.log('=== Azure OpenAI Function Starting ===');
-console.log('API Key exists:', !!openAIApiKey);
+console.log('Azure API Key exists:', !!azureApiKey);
+console.log('Azure Endpoint exists:', !!azureEndpoint);
+console.log('Deployment Name exists:', !!deploymentName);
 
 serve(async (req) => {
   console.log('🚀 Function called with method:', req.method);
@@ -32,16 +36,21 @@ serve(async (req) => {
       });
     }
 
-    if (!openAIApiKey) {
-      console.log('❌ No OpenAI API key configured');
-      return new Response(JSON.stringify({ error: 'OpenAI API key not configured' }), {
+    if (!azureApiKey || !azureEndpoint || !deploymentName) {
+      console.log('❌ Missing Azure OpenAI configuration');
+      return new Response(JSON.stringify({ 
+        error: 'Azure OpenAI configuration incomplete',
+        details: 'Missing API key, endpoint, or deployment name'
+      }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     console.log('✅ Validations passed');
-    console.log('🔑 API Key (first 8 chars):', openAIApiKey.substring(0, 8));
+    console.log('🔑 API Key (first 8 chars):', azureApiKey.substring(0, 8));
+    console.log('🌐 Endpoint:', azureEndpoint);
+    console.log('🚀 Deployment:', deploymentName);
 
     const prompt = `Based on this Swagger/OpenAPI specification, generate comprehensive API test cases in CSV format.
 
@@ -51,7 +60,7 @@ ${JSON.stringify(swaggerSpec, null, 2)}
 Generate test cases in this exact CSV format:
 API Endpoint,Method,Test Scenario,Input Data,Expected Result,Positive/Negative
 
-Create at least 10-15 comprehensive test cases covering:
+Create at least 15-20 comprehensive test cases covering:
 - Positive scenarios (valid requests with expected success responses)
 - Negative scenarios (invalid data, missing parameters, unauthorized access)
 - Edge cases (boundary values, special characters, large payloads)
@@ -69,10 +78,13 @@ Return only the CSV data with proper comma separation and quoted values where ne
 
     console.log('📤 Sending request to Azure OpenAI...');
     
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const azureUrl = `${azureEndpoint}/openai/deployments/${deploymentName}/chat/completions?api-version=2024-02-15-preview`;
+    console.log('🔗 Azure URL:', azureUrl);
+    
+    const response = await fetch(azureUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${openAIApiKey}`,
+        'api-key': azureApiKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -87,7 +99,7 @@ Return only the CSV data with proper comma separation and quoted values where ne
             content: prompt
           }
         ],
-        max_tokens: 3000,
+        max_tokens: 4000,
         temperature: 0.3,
       }),
     });
@@ -101,9 +113,9 @@ Return only the CSV data with proper comma separation and quoted values where ne
       console.error('❌ Error details:', errorText);
       
       return new Response(JSON.stringify({ 
-        error: `OpenAI API error: ${response.status}`, 
+        error: `Azure OpenAI API error: ${response.status}`, 
         details: errorText,
-        apiKeyPrefix: openAIApiKey.substring(0, 8)
+        apiKeyPrefix: azureApiKey.substring(0, 8)
       }), {
         status: response.status,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -235,6 +247,8 @@ Return only the CSV data with proper comma separation and quoted values where ne
       metadata: {
         provider: 'Azure OpenAI',
         model: 'gpt-4o-mini',
+        deployment: deploymentName,
+        endpoint: azureEndpoint,
         testCasesGenerated: csvData.length - 1,
         responseTokens: data.usage?.completion_tokens || 0,
         promptTokens: data.usage?.prompt_tokens || 0
@@ -252,8 +266,10 @@ Return only the CSV data with proper comma separation and quoted values where ne
       details: error.message,
       stack: error.stack,
       debug: {
-        hasApiKey: !!openAIApiKey,
-        apiKeyPrefix: openAIApiKey?.substring(0, 8)
+        hasApiKey: !!azureApiKey,
+        hasEndpoint: !!azureEndpoint,
+        hasDeployment: !!deploymentName,
+        apiKeyPrefix: azureApiKey?.substring(0, 8)
       }
     }), {
       status: 500,

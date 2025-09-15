@@ -51,7 +51,7 @@ ${JSON.stringify(swaggerSpec, null, 2)}
 Generate test cases in this exact format:
 API Endpoint | Method | Test Scenario | Input Data | Expected Result | Positive/Negative
 
-Create at least 5-10 comprehensive test cases covering:
+Create at least 15-20 comprehensive test cases covering:
 - Positive scenarios (valid requests)
 - Negative scenarios (invalid data, missing parameters)
 - Edge cases
@@ -83,7 +83,7 @@ Return only the CSV data, no additional text.`;
           temperature: 0.3,
           topK: 40,
           topP: 0.95,
-          maxOutputTokens: 2048,
+          maxOutputTokens: 4096,
         }
       }),
     });
@@ -126,13 +126,31 @@ Return only the CSV data, no additional text.`;
     console.log('✅ AI Response length:', aiResponse.length);
     console.log('📝 AI Response preview:', aiResponse.substring(0, 200));
 
-    // Create simple test data
-    const csvData = [
-      ['API Endpoint', 'Method', 'Test Scenario', 'Input Data', 'Expected Result', 'Positive/Negative'],
-      ['/pet', 'POST', 'Create new pet', '{"name":"Buddy","status":"available"}', '200 OK', 'Positive'],
-      ['/pet/{id}', 'GET', 'Get pet by ID', 'id=1', '200 OK', 'Positive'],
-      ['/pet/{id}', 'DELETE', 'Delete pet', 'id=1', '200 OK', 'Positive']
-    ];
+    // Parse CSV response into array format
+    const csvLines = aiResponse.trim().split('\n');
+    const csvData = csvLines.map(line => {
+      // Simple CSV parsing - split by pipe (|) or comma and handle quoted values
+      const fields = [];
+      let current = '';
+      let inQuotes = false;
+      const delimiter = line.includes('|') ? '|' : ',';
+      
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"' && (i === 0 || line[i-1] === delimiter)) {
+          inQuotes = true;
+        } else if (char === '"' && inQuotes && (i === line.length - 1 || line[i+1] === delimiter)) {
+          inQuotes = false;
+        } else if (char === delimiter && !inQuotes) {
+          fields.push(current.trim());
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      fields.push(current.trim());
+      return fields.map(field => field.replace(/^"|"$/g, '')); // Remove surrounding quotes
+    });
 
     const postmanCollection = {
       info: {
