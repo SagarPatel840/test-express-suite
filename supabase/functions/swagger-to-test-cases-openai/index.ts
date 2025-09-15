@@ -52,27 +52,81 @@ serve(async (req) => {
     console.log('🌐 Endpoint:', azureEndpoint);
     console.log('🚀 Deployment:', deploymentName);
 
-    const prompt = `Based on this Swagger/OpenAPI specification, generate comprehensive API test cases in CSV format.
+    const prompt = `You are a Senior QA Analyst specializing in API testing for Lovable-generated applications.
+You will be given a Swagger/OpenAPI specification.
+Your task is to analyze the Swagger specification ONLY and generate comprehensive test cases based strictly on the documented API contract.
 
-Swagger Spec:
+Core Principle: Generate test cases ONLY based on what is explicitly defined in the Swagger specification. Do not assume or add test scenarios not documented in the API spec.
+
+Swagger Specification:
 ${JSON.stringify(swaggerSpec, null, 2)}
 
+## Test Coverage Requirements (Swagger-Driven):
+
+### 1. Schema-Based Functional Tests
+- Extract from Swagger: All endpoints, HTTP methods, parameters, and schemas
+- Happy path tests using valid data types as defined in Swagger schemas
+- Negative tests for each required field marked in the specification
+- Optional field tests based on Swagger's "required" array
+- Enum validation using exact enum values from Swagger definitions
+- Data type validation based on Swagger type definitions (string, integer, boolean, array, object)
+- Format validation based on Swagger format specifications (email, date-time, uuid, etc.)
+
+### 2. Swagger-Defined Boundary Tests
+- String constraints: minLength, maxLength from Swagger schema
+- Numeric constraints: minimum, maximum, multipleOf from Swagger
+- Array constraints: minItems, maxItems from Swagger definitions
+- Pattern validation: regex patterns defined in Swagger
+- Null/empty tests only for fields not marked as required in Swagger
+
+### 3. Request Body Generation (Schema-Based)
+- Parse Swagger schemas to generate realistic JSON payloads
+- For each endpoint with requestBody:
+  - Valid payload using Swagger example or schema-compliant data
+  - Invalid payload violating each schema constraint
+  - Missing required fields based on Swagger "required" array
+  - Wrong data types based on Swagger type definitions
+- Content-Type validation using mediaType from Swagger requestBody
+
+### 4. Response Validation (Swagger Contract)
+- Status codes exactly as defined in Swagger responses section
+- Response schema validation against Swagger response definitions
+- Error response testing for each documented error status code
+- Response headers as specified in Swagger response headers
+
+### 5. Parameter Testing (Swagger Parameters)
+- Path parameters: Extract from Swagger path definitions
+- Query parameters: Use Swagger parameter definitions (required, type, format)
+- Header parameters: Based on Swagger parameter specifications
+- Parameter constraints: Apply Swagger-defined validation rules
+
+### 6. Authentication/Security (Swagger Security Schemes)
+- Extract security requirements from Swagger securitySchemes
+- Test authentication methods as defined in Swagger (bearer, apiKey, oauth2)
+- Security scope testing if OAuth2 scopes are defined
+- Endpoint security based on Swagger security requirements per operation
+
+### 7. HTTP Method Validation
+- Supported methods only as documented in Swagger for each path
+- Unsupported method testing (405 Method Not Allowed)
+- Method-specific behavior as described in Swagger operation definitions
+
+### 8. Edge Cases from Swagger Constraints
+- Boundary values from min/max constraints in Swagger
+- Invalid formats against Swagger format specifications
+- Schema violations for complex object structures
+- Array validation against Swagger array item schemas
+
 Generate test cases in this exact CSV format:
-API Endpoint,Method,Test Scenario,Input Data,Expected Result,Positive/Negative
+Test_ID,Endpoint,HTTP_Method,Test_Category,Test_Scenario,Swagger_Constraint_Reference,Request_Headers,Path_Params,Query_Params,Request_Body,Expected_Status,Expected_Response_Schema,Test_Type,Priority
 
-Create at least 15-20 comprehensive test cases covering:
-- Positive scenarios (valid requests with expected success responses)
-- Negative scenarios (invalid data, missing parameters, unauthorized access)
-- Edge cases (boundary values, special characters, large payloads)
-- Security tests (authentication, authorization, input validation)
-- Different HTTP methods (GET, POST, PUT, DELETE, PATCH)
-
-For each endpoint, include:
-1. Valid request with proper authentication and data
-2. Request without authentication token (401 expected)
-3. Request with invalid/malformed data (400 expected)
-4. Request to non-existent resource (404 expected)
-5. Boundary/edge case tests where applicable
+Requirements:
+1. Generate 25-35 comprehensive test cases
+2. Reference the specific Swagger section for each test case
+3. Use only data types, constraints, and examples from Swagger
+4. Ensure every test case maps to a Swagger specification element
+5. Include realistic but Swagger-compliant test data
+6. Cover all endpoints, methods, and documented constraints
 
 Return only the CSV data with proper comma separation and quoted values where needed.`;
 
