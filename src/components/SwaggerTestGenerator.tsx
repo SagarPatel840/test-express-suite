@@ -263,7 +263,7 @@ export const SwaggerTestGenerator = () => {
               <TabsContent value="csv" className="mt-4">
                 <div className="border rounded-lg">
                   <div className="h-96 w-full overflow-x-auto overflow-y-auto">
-                    <Table className="min-w-max">
+                    <Table className="min-w-[1200px]" >
                       <TableHeader>
                         <TableRow>
                           {testCases?.[0]?.map((header, index) => (
