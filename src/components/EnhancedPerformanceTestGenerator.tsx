@@ -19,7 +19,7 @@ import * as yaml from "js-yaml";
 
 interface SwaggerConfig {
   baseUrl: string;
-  groupBy: 'tag' | 'path';
+  groupBy: 'tag' | 'path' | 'method' | 'resource' | 'none';
 }
 
 interface Analysis {
@@ -978,6 +978,25 @@ ${rtfContent}
                           </>
                         )}
                       </Button>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="groupBy">Group Requests By</Label>
+                        <Select
+                          value={swaggerConfig.groupBy || 'path'}
+                          onValueChange={(value: 'tag' | 'path' | 'method' | 'resource' | 'none') => setSwaggerConfig(prev => ({ ...prev, groupBy: value }))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select grouping method" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="path">Path Segments</SelectItem>
+                            <SelectItem value="tag">Tags</SelectItem>
+                            <SelectItem value="method">HTTP Method</SelectItem>
+                            <SelectItem value="resource">Resource Type</SelectItem>
+                            <SelectItem value="none">No Grouping</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
 
                       {swaggerJmeterXml && (
                         <div className="space-y-3">
