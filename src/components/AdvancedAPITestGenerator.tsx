@@ -722,7 +722,7 @@ export const AdvancedAPITestGenerator = () => {
             <CardContent>
 <div className="border rounded-lg overflow-hidden">
   <div className="h-96 w-full overflow-x-auto overflow-y-auto">
-    <table className="min-w-max text-sm border-collapse border border-border">
+    <table className="min-w-full table-fixed text-sm border-collapse border border-border">
       <thead className="bg-muted">
         <tr>
           <th className="border border-border p-2 text-left whitespace-nowrap">Test ID</th>
