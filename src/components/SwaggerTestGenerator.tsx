@@ -261,8 +261,8 @@ export const SwaggerTestGenerator = () => {
               </TabsList>
 
               <TabsContent value="csv" className="mt-4">
-                <div className="border rounded-lg max-w-full">
-                  <div className="h-96 w-full overflow-auto">
+                <div className="border rounded-lg max-w-full overflow-hidden">
+                  <div className="h-96 max-h-[70vh] w-full overflow-x-auto overflow-y-auto overscroll-contain">
                     <div className="min-w-max">
                       <Table>
                         <TableHeader>
