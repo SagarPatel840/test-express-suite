@@ -260,9 +260,9 @@ export const SwaggerTestGenerator = () => {
                 <TabsTrigger value="preview">UI Preview</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="csv" className="mt-4">
-                <div className="border rounded-lg max-w-full overflow-hidden">
-                  <div className="h-[60vh] md:h-[65vh] lg:h-[70vh] w-full overflow-x-auto overflow-y-auto overscroll-contain">
+              <TabsContent value="csv" className="mt-4 max-h-[70vh]">
+                <div className="border rounded-lg max-w-full h-[60vh] md:h-[65vh] lg:h-[70vh] overflow-hidden">
+                  <div className="h-full w-full overflow-x-auto overflow-y-auto overscroll-contain">
                     <div className="min-w-max">
                       <Table>
                         <TableHeader>
@@ -289,37 +289,39 @@ export const SwaggerTestGenerator = () => {
                 </div>
               </TabsContent>
 
-              <TabsContent value="postman" className="mt-4">
+              <TabsContent value="postman" className="mt-4 max-h-[70vh]">
                 <Textarea
                   value={postmanCollection ? JSON.stringify(postmanCollection, null, 2) : ''}
                   readOnly
-                  className="min-h-[400px] font-mono text-sm"
+                  className="h-[60vh] md:h-[65vh] lg:h-[70vh] font-mono text-sm overflow-auto"
                 />
               </TabsContent>
 
-              <TabsContent value="preview" className="mt-4">
-                <div className="space-y-4">
-                  {testCases?.slice(1).map((row, index) => (
-                    <div key={index} className="border rounded-lg p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-sm font-medium">{row[2]}</h4>
-                        <div className="flex gap-2">
-                          <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">
-                            {row[1]}
-                          </span>
-                          <span className={`text-xs px-2 py-1 rounded ${
-                            row[5] === 'Positive' ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
-                          }`}>
-                            {row[5]}
-                          </span>
+              <TabsContent value="preview" className="mt-4 max-h-[70vh]">
+                <div className="h-[60vh] md:h-[65vh] lg:h-[70vh] overflow-y-auto">
+                  <div className="space-y-4">
+                    {testCases?.slice(1).map((row, index) => (
+                      <div key={index} className="border rounded-lg p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-sm font-medium">{row[2]}</h4>
+                          <div className="flex gap-2">
+                            <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">
+                              {row[1]}
+                            </span>
+                            <span className={`text-xs px-2 py-1 rounded ${
+                              row[5] === 'Positive' ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
+                            }`}>
+                              {row[5]}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          <p><strong>Endpoint:</strong> {row[0]}</p>
+                          <p><strong>Expected:</strong> {row[4]}</p>
                         </div>
                       </div>
-                      <div className="text-sm text-muted-foreground">
-                        <p><strong>Endpoint:</strong> {row[0]}</p>
-                        <p><strong>Expected:</strong> {row[4]}</p>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               </TabsContent>
             </Tabs>
