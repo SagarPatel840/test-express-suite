@@ -261,28 +261,30 @@ export const SwaggerTestGenerator = () => {
               </TabsList>
 
               <TabsContent value="csv" className="mt-4">
-                <div className="border rounded-lg">
-                  <div className="h-96 w-full overflow-x-auto overflow-y-auto">
-                    <Table className="min-w-[1200px]" >
-                      <TableHeader>
-                        <TableRow>
-                          {testCases?.[0]?.map((header, index) => (
-                            <TableHead key={index} className="whitespace-nowrap">{header}</TableHead>
-                          ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {testCases?.slice(1).map((row, rowIndex) => (
-                          <TableRow key={rowIndex}>
-                            {row.map((cell, cellIndex) => (
-                              <TableCell key={cellIndex} className="align-top whitespace-pre-wrap break-words text-xs px-3 py-2">
-                                {cell}
-                              </TableCell>
+                <div className="border rounded-lg max-w-full">
+                  <div className="h-96 w-full overflow-auto">
+                    <div className="min-w-max">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            {testCases?.[0]?.map((header, index) => (
+                              <TableHead key={index} className="whitespace-nowrap min-w-[120px] max-w-[200px]">{header}</TableHead>
                             ))}
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                        </TableHeader>
+                        <TableBody>
+                          {testCases?.slice(1).map((row, rowIndex) => (
+                            <TableRow key={rowIndex}>
+                              {row.map((cell, cellIndex) => (
+                                <TableCell key={cellIndex} className="align-top text-xs px-3 py-2 min-w-[120px] max-w-[200px]">
+                                  <div className="break-words whitespace-pre-wrap">{cell}</div>
+                                </TableCell>
+                              ))}
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
                   </div>
                 </div>
               </TabsContent>
