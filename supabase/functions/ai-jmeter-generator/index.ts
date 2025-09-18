@@ -27,14 +27,22 @@ serve(async (req) => {
   }
 
   try {
-    const { swaggerSpec, loadConfig, aiProvider = 'google' } = await req.json();
+    const { swaggerSpec, loadConfig, aiProvider = 'google', additionalPrompt = '' } = await req.json();
     
     console.log('Processing Swagger spec with AI-powered JMeter generation...');
     console.log('AI Provider:', aiProvider);
     console.log('Load Config:', loadConfig);
 
+    // Parse swagger content if it's a string
+    let parsedSwaggerSpec;
+    try {
+      parsedSwaggerSpec = typeof swaggerSpec === 'string' ? JSON.parse(swaggerSpec) : swaggerSpec;
+    } catch (error) {
+      throw new Error("Invalid Swagger/OpenAPI JSON format");
+    }
+
     // Validate inputs
-    if (!swaggerSpec || !swaggerSpec.paths) {
+    if (!parsedSwaggerSpec || !parsedSwaggerSpec.paths) {
       throw new Error("Invalid Swagger specification - no paths found");
     }
 
@@ -48,18 +56,18 @@ serve(async (req) => {
 
     // Extract API information for AI analysis
     const apiInfo = {
-      title: swaggerSpec.info?.title || 'API',
-      version: swaggerSpec.info?.version || '1.0',
-      description: swaggerSpec.info?.description || '',
-      baseUrl: loadConfig?.baseUrl || swaggerSpec.servers?.[0]?.url || 'https://api.example.com',
-      endpoints: Object.keys(swaggerSpec.paths).length,
+      title: parsedSwaggerSpec.info?.title || 'API',
+      version: parsedSwaggerSpec.info?.version || '1.0',
+      description: parsedSwaggerSpec.info?.description || '',
+      baseUrl: loadConfig?.baseUrl || parsedSwaggerSpec.servers?.[0]?.url || 'https://api.example.com',
+      endpoints: Object.keys(parsedSwaggerSpec.paths).length,
       methods: []
     };
 
-    // Collect all HTTP methods and endpoints
-    Object.entries(swaggerSpec.paths).forEach(([path, pathItem]: [string, any]) => {
+    // Collect all HTTP methods and endpoints (including head, options for completeness)
+    Object.entries(parsedSwaggerSpec.paths).forEach(([path, pathItem]: [string, any]) => {
       Object.entries(pathItem).forEach(([method, operation]: [string, any]) => {
-        if (['get', 'post', 'put', 'delete', 'patch'].includes(method)) {
+        if (['get', 'post', 'put', 'delete', 'patch', 'head', 'options'].includes(method)) {
           apiInfo.methods.push({
             method: method.toUpperCase(),
             path,
@@ -72,48 +80,83 @@ serve(async (req) => {
 
     console.log(`Found ${apiInfo.methods.length} API endpoints to analyze`);
 
-    // Generate AI analysis prompt
-    const analysisPrompt = `
-    Analyze the following OpenAPI/Swagger specification and provide intelligent insights for JMeter performance testing:
+    // Use the exact prompt provided by the user for Swagger JMX generation
+    const jmxPrompt = `You are an expert in JMeter test plan generation.  
+Your task is to create a complete Apache JMeter (.jmx) file based on the provided Swagger (OpenAPI) specification.  
 
-    API Information:
-    - Title: ${apiInfo.title}
-    - Version: ${apiInfo.version}
-    - Description: ${apiInfo.description}
-    - Base URL: ${apiInfo.baseUrl}
-    - Total Endpoints: ${apiInfo.endpoints}
+### Requirements:  
+1. Parse the Swagger file to identify:  
+   - All endpoints (paths + methods)  
+   - Request parameters (path, query, headers)  
+   - Request bodies (schemas, fields, data types)  
+   - Authentication requirements  
 
-    Sample Endpoints:
-    ${apiInfo.methods.slice(0, 10).map(ep => `${ep.method} ${ep.path} - ${ep.summary}`).join('\n')}
+2. Create a JMeter Test Plan (.jmx) with the following:  
+   - Thread Group with configurable threads, ramp-up, and loop count.  
+   - HTTP Request Samplers for every endpoint in Swagger.  
+   - Group Samplers by API tag or path for better readability.  
+   - Add \`HTTP Header Manager\` with required headers such as \`Content-Type: application/json\`, \`Authorization\`, etc.  
+   - Add \`CSV Data Set Config\` to parameterize dynamic values like user IDs, emails, or tokens.  
+   - For request bodies, insert variables (e.g., \`\${variableName}\`) instead of hardcoded values.  
+   - Add realistic sample test data for variables based on Swagger schema (strings, numbers, booleans, arrays).  
 
-    Load Test Configuration:
-    - Threads: ${loadConfig.threadCount}
-    - Ramp-up: ${loadConfig.rampUpTime}s
-    - Duration: ${loadConfig.duration}s
-    - Loops: ${loadConfig.loopCount}
+3. Enhancements:  
+   - Automatically handle path parameters with variables.  
+   - Insert default test data where the Swagger schema does not provide examples.  
+   - Add \`JSON Extractor\` or \`Regular Expression Extractor\` for correlation of response values (e.g., auth token).  
+   - Ensure the JMX is well-formed XML and can be directly opened in JMeter without errors.  
 
-    Please provide:
-    1. Suggested performance test scenarios based on the API endpoints
-    2. Critical performance bottlenecks to watch for
-    3. Recommended assertions and thresholds
-    4. Load test strategy recommendations
-    5. Potential correlation requirements
+### Body Data Rules:  
+1. **Swagger-based JMX**  
+   - For each request body defined in Swagger schemas:  
+     - Map schema fields to \`\${variableName}\` placeholders instead of hardcoded values.  
+     - Use CSV Data Set Config to supply values for those variables.  
+     - If the schema has examples/defaults, use them as initial CSV values.  
+     - Support JSON, XML, or form-data body formats depending on Swagger definition.  
 
-    Respond in JSON format:
-    {
-      "scenarios": [{"name": "Login Flow", "description": "Test user authentication endpoints", "priority": "high"}],
-      "bottlenecks": ["Database queries", "Authentication overhead"],
-      "assertions": [{"type": "responseTime", "threshold": 2000}, {"type": "statusCode", "values": [200, 201]}],
-      "strategy": "Start with baseline load, gradually increase to find breaking point",
-      "correlations": ["authToken", "sessionId", "csrf"]
-    }
-    `;
+   Example for Swagger schema:  
+   \`\`\`json
+   {
+     "username": "\${username}",
+     "password": "\${password}",
+     "age": \${age}
+   }
+   \`\`\`
 
-    let aiAnalysis: any = {};
+2. **General Body Handling**  
+   - Always wrap request body in elementProp → Argument.value inside the JMX XML.  
+   - Ensure Content-Type in HeaderManager matches the body type.  
+   - If no body is provided in Swagger, skip body section but keep headers.  
+   - Ensure the JMX is valid and directly importable in JMeter.  
 
-    // Call AI provider
+### Output:  
+- Provide the final JMX file content as valid XML inside code block.  
+- Do not summarize, only return the JMX file.  
+- Ensure all nodes (\`TestPlan\`, \`ThreadGroup\`, \`HTTPSamplerProxy\`, etc.) follow correct JMeter XML structure.  
+
+### Input:  
+Swagger/OpenAPI specification (YAML or JSON format) will be provided.  
+
+### Task:  
+Generate the complete JMX file according to the above rules.
+
+${additionalPrompt ? `### Additional Requirements:
+${additionalPrompt}
+
+` : ''}### Swagger/OpenAPI specification:
+${JSON.stringify(parsedSwaggerSpec, null, 2)}
+
+### Load Configuration:
+- Thread Count: ${loadConfig.threadCount}
+- Ramp-up Time: ${loadConfig.rampUpTime} seconds
+- Duration: ${loadConfig.duration} seconds
+- Loop Count: ${loadConfig.loopCount}`;
+
+    let jmeterXmlFromAI = "";
+
+    // Call AI provider to generate JMeter XML
     if (aiProvider === 'google' && googleAIApiKey) {
-      console.log('Calling Google AI Studio...');
+      console.log('Calling Google AI Studio for JMX generation...');
       try {
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${googleAIApiKey}`, {
           method: 'POST',
@@ -123,7 +166,7 @@ serve(async (req) => {
           body: JSON.stringify({
             contents: [{
               parts: [{
-                text: analysisPrompt
+                text: jmxPrompt
               }]
             }]
           }),
@@ -139,15 +182,13 @@ serve(async (req) => {
         console.log('Google AI Response received');
         
         if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-          try {
-            const aiText = data.candidates[0].content.parts[0].text;
-            // Extract JSON from the response (remove markdown formatting if present)
-            const jsonMatch = aiText.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              aiAnalysis = JSON.parse(jsonMatch[0]);
-            }
-          } catch (error) {
-            console.error('Error parsing Google AI response:', error);
+          const aiText = data.candidates[0].content.parts[0].text;
+          // Extract XML content from code blocks if present
+          const xmlMatch = aiText.match(/```(?:xml)?\s*([\s\S]*?)\s*```/) || aiText.match(/<\?xml[\s\S]*<\/jmeterTestPlan>/);
+          if (xmlMatch) {
+            jmeterXmlFromAI = xmlMatch[1] || xmlMatch[0];
+          } else {
+            jmeterXmlFromAI = aiText;
           }
         }
       } catch (error) {
@@ -155,7 +196,7 @@ serve(async (req) => {
         // Continue with fallback
       }
     } else if (aiProvider === 'openai' && openAIApiKey) {
-      console.log('Calling Azure OpenAI...');
+      console.log('Calling OpenAI for JMX generation...');
       try {
         const response = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
@@ -166,10 +207,10 @@ serve(async (req) => {
           body: JSON.stringify({
             model: 'gpt-5-2025-08-07',
             messages: [
-              { role: 'system', content: 'You are an expert performance testing engineer. Analyze APIs and provide intelligent insights for JMeter performance testing.' },
-              { role: 'user', content: analysisPrompt }
+              { role: 'system', content: 'You are an expert JMeter test plan generator. Generate only valid JMeter XML files based on OpenAPI/Swagger specifications.' },
+              { role: 'user', content: jmxPrompt }
             ],
-            max_completion_tokens: 2000,
+            max_completion_tokens: 8000,
           }),
         });
 
@@ -182,15 +223,13 @@ serve(async (req) => {
         const data = await response.json();
         console.log('OpenAI Response received');
         
-        try {
-          const aiText = data.choices[0].message.content;
-          // Extract JSON from the response
-          const jsonMatch = aiText.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            aiAnalysis = JSON.parse(jsonMatch[0]);
-          }
-        } catch (error) {
-          console.error('Error parsing OpenAI response:', error);
+        const aiText = data.choices[0].message.content;
+        // Extract XML content from code blocks if present
+        const xmlMatch = aiText.match(/```(?:xml)?\s*([\s\S]*?)\s*```/) || aiText.match(/<\?xml[\s\S]*<\/jmeterTestPlan>/);
+        if (xmlMatch) {
+          jmeterXmlFromAI = xmlMatch[1] || xmlMatch[0];
+        } else {
+          jmeterXmlFromAI = aiText;
         }
       } catch (error) {
         console.error('OpenAI API call failed:', error);
@@ -198,37 +237,34 @@ serve(async (req) => {
       }
     }
 
-    // Fallback analysis if AI fails or no API key
-    if (!aiAnalysis.scenarios) {
-      console.log('Using fallback AI analysis');
-      aiAnalysis = {
-        scenarios: [
-          { name: "API Load Test", description: "Basic load test for all endpoints", priority: "high" },
-          { name: "Spike Test", description: "Test API under sudden load spikes", priority: "medium" }
-        ],
+    // Use AI-generated JMeter XML if available, otherwise use fallback generation
+    let finalJmeterXml: string;
+    
+    if (jmeterXmlFromAI && jmeterXmlFromAI.includes('<jmeterTestPlan')) {
+      console.log('Using AI-generated JMeter XML');
+      finalJmeterXml = enhanceJMeterXML(jmeterXmlFromAI, loadConfig);
+    } else {
+      console.log('Using fallback JMeter XML generation');
+      // Fallback: generate basic JMeter XML locally
+      finalJmeterXml = generateJMeterXML(parsedSwaggerSpec, loadConfig, { 
+        scenarios: [{ name: "API Load Test", description: "Basic load test for all endpoints", priority: "high" }],
         bottlenecks: ["Response time", "Throughput", "Error rate"],
-        assertions: [
-          { type: "responseTime", threshold: 5000 },
-          { type: "statusCode", values: [200, 201, 202, 204] }
-        ],
+        assertions: [{ type: "responseTime", threshold: 5000 }, { type: "statusCode", values: [200, 201, 202, 204] }],
         strategy: "Gradual load increase with monitoring",
         correlations: ["token", "sessionId"]
-      };
+      });
     }
 
-    // Generate JMeter XML
-    const jmeterXml = generateJMeterXML(swaggerSpec, loadConfig, aiAnalysis);
-
-    console.log('JMeter XML generated successfully');
+    console.log('JMeter XML finalized successfully');
 
     return new Response(JSON.stringify({
       success: true,
-      jmeterXml,
-      analysis: aiAnalysis,
+      jmeterXml: finalJmeterXml,
       metadata: {
-        provider: aiProvider === 'google' ? 'Google AI Studio' : 'Azure OpenAI',
+        provider: aiProvider === 'google' ? 'Google AI Studio' : 'OpenAI',
         endpoints: apiInfo.methods.length,
-        threadGroups: aiAnalysis.scenarios?.length || 1
+        generatedByAI: jmeterXmlFromAI && jmeterXmlFromAI.includes('<jmeterTestPlan'),
+        testPlanName: loadConfig.testPlanName
       }
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -279,7 +315,7 @@ function generateJMeterXML(swaggerSpec: any, loadConfig: LoadConfig, aiAnalysis:
   
   Object.entries(swaggerSpec.paths || {}).forEach(([path, pathItem]: [string, any]) => {
     Object.entries(pathItem).forEach(([method, operation]: [string, any]) => {
-      if (['get', 'post', 'put', 'delete', 'patch'].includes(method)) {
+      if (['get', 'post', 'put', 'delete', 'patch', 'head', 'options'].includes(method)) {
         const tag = operation.tags?.[0] || 'Default';
         if (!endpointGroups[tag]) endpointGroups[tag] = [];
         endpointGroups[tag].push({ path, method: method.toUpperCase(), operation });
@@ -469,4 +505,132 @@ function generateJMeterXML(swaggerSpec: any, loadConfig: LoadConfig, aiAnalysis:
     </hashTree>
   </hashTree>
 </jmeterTestPlan>`;
+}
+
+// Function to enhance AI-generated JMX with missing essential elements
+function enhanceJMeterXML(aiGeneratedXml: string, loadConfig: LoadConfig): string {
+  let enhancedXml = aiGeneratedXml;
+  
+  // Check and add missing listeners if not present
+  if (!enhancedXml.includes('SummaryReport')) {
+    console.log('Adding missing Summary Report listener');
+    const summaryReport = `
+      <!-- Summary Report -->
+      <ResultCollector guiclass="SummaryReport" testclass="ResultCollector" testname="Summary Report" enabled="true">
+        <boolProp name="ResultCollector.error_logging">false</boolProp>
+        <objProp>
+          <name>saveConfig</name>
+          <value class="SampleSaveConfiguration">
+            <time>true</time>
+            <latency>true</latency>
+            <timestamp>true</timestamp>
+            <success>true</success>
+            <label>true</label>
+            <code>true</code>
+            <message>true</message>
+            <threadName>true</threadName>
+            <dataType>true</dataType>
+            <encoding>false</encoding>
+            <assertions>true</assertions>
+            <subresults>true</subresults>
+            <responseData>false</responseData>
+            <samplerData>false</samplerData>
+            <xml>false</xml>
+            <fieldNames>true</fieldNames>
+            <responseHeaders>false</responseHeaders>
+            <requestHeaders>false</requestHeaders>
+            <responseDataOnError>false</responseDataOnError>
+            <saveAssertionResultsFailureMessage>true</saveAssertionResultsFailureMessage>
+            <assertionsResultsToSave>0</assertionsResultsToSave>
+            <bytes>true</bytes>
+            <sentBytes>true</sentBytes>
+            <url>true</url>
+            <threadCounts>true</threadCounts>
+            <idleTime>true</idleTime>
+            <connectTime>true</connectTime>
+          </value>
+        </objProp>
+        <stringProp name="filename"></stringProp>
+      </ResultCollector>
+      <hashTree/>`;
+    
+    enhancedXml = enhancedXml.replace(
+      '</hashTree>\n</jmeterTestPlan>',
+      summaryReport + '\n    </hashTree>\n  </hashTree>\n</jmeterTestPlan>'
+    );
+  }
+
+  if (!enhancedXml.includes('ViewResultsFullVisualizer')) {
+    console.log('Adding missing View Results Tree listener');
+    const viewResultsTree = `
+      <!-- View Results Tree -->
+      <ResultCollector guiclass="ViewResultsFullVisualizer" testclass="ResultCollector" testname="View Results Tree" enabled="true">
+        <boolProp name="ResultCollector.error_logging">false</boolProp>
+        <objProp>
+          <name>saveConfig</name>
+          <value class="SampleSaveConfiguration">
+            <time>true</time>
+            <latency>true</latency>
+            <timestamp>true</timestamp>
+            <success>true</success>
+            <label>true</label>
+            <code>true</code>
+            <message>true</message>
+            <threadName>true</threadName>
+            <dataType>true</dataType>
+            <encoding>false</encoding>
+            <assertions>true</assertions>
+            <subresults>true</subresults>
+            <responseData>true</responseData>
+            <samplerData>true</samplerData>
+            <xml>false</xml>
+            <fieldNames>true</fieldNames>
+            <responseHeaders>true</responseHeaders>
+            <requestHeaders>true</requestHeaders>
+            <responseDataOnError>false</responseDataOnError>
+            <saveAssertionResultsFailureMessage>true</saveAssertionResultsFailureMessage>
+            <assertionsResultsToSave>0</assertionsResultsToSave>
+            <bytes>true</bytes>
+            <sentBytes>true</sentBytes>
+            <url>true</url>
+            <threadCounts>true</threadCounts>
+            <idleTime>true</idleTime>
+            <connectTime>true</connectTime>
+          </value>
+        </objProp>
+        <stringProp name="filename"></stringProp>
+      </ResultCollector>
+      <hashTree/>`;
+    
+    enhancedXml = enhancedXml.replace(
+      '</hashTree>\n</jmeterTestPlan>',
+      viewResultsTree + '\n    </hashTree>\n  </hashTree>\n</jmeterTestPlan>'
+    );
+  }
+
+  // Check and enhance HTTP samplers to ensure they have proper body data
+  if (loadConfig.addCsvConfig && !enhancedXml.includes('CSVDataSet')) {
+    console.log('Adding missing CSV Data Set Config');
+    const csvConfig = `
+        <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet" testname="CSV Data Set Config" enabled="true">
+          <stringProp name="delimiter">,</stringProp>
+          <stringProp name="fileEncoding">UTF-8</stringProp>
+          <stringProp name="filename">test_data.csv</stringProp>
+          <boolProp name="ignoreFirstLine">true</boolProp>
+          <boolProp name="quotedData">false</boolProp>
+          <boolProp name="recycle">true</boolProp>
+          <stringProp name="shareMode">shareMode.all</stringProp>
+          <boolProp name="stopThread">false</boolProp>
+          <stringProp name="variableNames">userId,userEmail,authToken,testData</stringProp>
+        </CSVDataSet>
+        <hashTree/>`;
+    
+    // Add CSV config after thread group opening
+    enhancedXml = enhancedXml.replace(
+      /<ThreadGroup[^>]*>\s*<hashTree>/g,
+      (match) => match + csvConfig
+    );
+  }
+
+  return enhancedXml;
 }

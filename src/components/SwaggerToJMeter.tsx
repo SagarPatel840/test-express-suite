@@ -8,34 +8,55 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Download, FileText, Settings, Zap } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 import * as yaml from "js-yaml";
 
 interface JMeterConfig {
   threadCount: number;
   rampUpTime: number;
   loopCount: number;
+  duration: number;
   baseUrl: string;
   testPlanName: string;
   groupingStrategy: 'thread-groups' | 'simple-controllers';
   addAssertions: boolean;
   addCorrelation: boolean;
   generateCsvConfig: boolean;
+  responseTimeThreshold: number;
+  throughputThreshold: number;
+  errorRateThreshold: number;
+  connectionTimeout: number;
+  responseTimeout: number;
+  followRedirects: boolean;
+  useKeepAlive: boolean;
+  enableReporting: boolean;
 }
 
 export const SwaggerToJMeter = () => {
   const [swaggerContent, setSwaggerContent] = useState("");
   const [jmeterXml, setJmeterXml] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [additionalPrompt, setAdditionalPrompt] = useState("");
+  const [aiProvider, setAiProvider] = useState<'google' | 'openai'>('google');
   const [config, setConfig] = useState<JMeterConfig>({
     threadCount: 10,
-    rampUpTime: 10,
+    rampUpTime: 60,
     loopCount: 1,
+    duration: 300,
     baseUrl: "",
     testPlanName: "API Performance Test",
     groupingStrategy: 'thread-groups',
     addAssertions: true,
     addCorrelation: true,
-    generateCsvConfig: false
+    generateCsvConfig: false,
+    responseTimeThreshold: 5000,
+    throughputThreshold: 100,
+    errorRateThreshold: 5,
+    connectionTimeout: 10000,
+    responseTimeout: 30000,
+    followRedirects: true,
+    useKeepAlive: true,
+    enableReporting: true
   });
   const { toast } = useToast();
 
@@ -690,46 +711,57 @@ CSV Config: ${config.generateCsvConfig ? 'Enabled' : 'Disabled'}</stringProp>
       return;
     }
 
-    setIsProcessing(true);
-    try {
-      // Parse swagger/openapi spec
-      let spec;
-      try {
-        spec = JSON.parse(swaggerContent);
-      } catch {
-        try {
-          spec = yaml.load(swaggerContent);
-        } catch (yamlError) {
-          throw new Error("Invalid JSON or YAML format");
-        }
-      }
-
-      // Basic validation - check if it looks like an OpenAPI/Swagger spec
-      if (!spec || typeof spec !== 'object') {
-        throw new Error("Invalid specification format");
-      }
-      
-      if (!spec.openapi && !spec.swagger) {
-        throw new Error("Not a valid OpenAPI/Swagger specification. Missing 'openapi' or 'swagger' field.");
-      }
-      
-      if (!spec.paths || typeof spec.paths !== 'object') {
-        throw new Error("No paths found in the specification");
-      }
-      
-      // Generate JMeter XML
-      const xml = generateJMeterXml(spec, config);
-      setJmeterXml(xml);
-
+    if (!config.baseUrl.trim()) {
       toast({
-        title: "JMeter file generated successfully",
-        description: "You can now download the JMX file.",
+        title: "Missing base URL",
+        description: "Please enter a valid base URL for the API.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsProcessing(true);
+    
+    try {
+      // Use AI-based JMX generation
+      const { data, error } = await supabase.functions.invoke('ai-jmeter-generator', {
+        body: {
+          swaggerContent,
+          config,
+          aiProvider,
+          additionalPrompt
+        }
+      });
+
+      if (error) {
+        console.error('Swagger to JMX error:', error);
+        throw new Error(error.message || 'Unknown error occurred');
+      }
+
+      console.log('AI-generated JMX content received:', {
+        provider: aiProvider,
+        endpoints: data?.endpointCount || 0,
+        generatedByAI: true,
+        testPlanName: config.testPlanName
+      });
+
+      if (!data || !data.jmxContent) {
+        throw new Error('No JMX content received from AI');
+      }
+
+      setJmeterXml(data.jmxContent);
+      
+      toast({
+        title: "JMeter Test Plan Generated",
+        description: `AI-generated test plan ready with ${data.endpointCount || 'multiple'} endpoints`,
       });
     } catch (error) {
       console.error('Error generating JMeter file:', error);
+      const errorMessage = error instanceof Error ? error.message : "An unexpected error occurred.";
+      
       toast({
         title: "Error generating JMeter file",
-        description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        description: `Error: ${errorMessage}`,
         variant: "destructive",
       });
     } finally {
@@ -795,20 +827,21 @@ CSV Config: ${config.generateCsvConfig ? 'Enabled' : 'Disabled'}</stringProp>
               />
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label htmlFor="threadCount">Threads</Label>
+                <Label htmlFor="threadCount">Thread Count (Virtual Users)</Label>
                 <Input
                   id="threadCount"
                   type="number"
                   min="1"
+                  max="1000"
                   value={config.threadCount}
                   onChange={(e) => setConfig(prev => ({ ...prev, threadCount: parseInt(e.target.value) || 1 }))}
                 />
               </div>
               
               <div>
-                <Label htmlFor="rampUpTime">Ramp-up (s)</Label>
+                <Label htmlFor="rampUpTime">Ramp-up Time (s)</Label>
                 <Input
                   id="rampUpTime"
                   type="number"
@@ -817,9 +850,22 @@ CSV Config: ${config.generateCsvConfig ? 'Enabled' : 'Disabled'}</stringProp>
                   onChange={(e) => setConfig(prev => ({ ...prev, rampUpTime: parseInt(e.target.value) || 1 }))}
                 />
               </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="duration">Test Duration (seconds)</Label>
+                <Input
+                  id="duration"
+                  type="number"
+                  min="1"
+                  value={config.duration}
+                  onChange={(e) => setConfig(prev => ({ ...prev, duration: parseInt(e.target.value) || 1 }))}
+                />
+              </div>
               
               <div>
-                <Label htmlFor="loopCount">Loops</Label>
+                <Label htmlFor="loopCount">Loop Count</Label>
                 <Input
                   id="loopCount"
                   type="number"
@@ -827,6 +873,69 @@ CSV Config: ${config.generateCsvConfig ? 'Enabled' : 'Disabled'}</stringProp>
                   value={config.loopCount}
                   onChange={(e) => setConfig(prev => ({ ...prev, loopCount: parseInt(e.target.value) || 1 }))}
                 />
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h4 className="text-sm font-medium">Performance Thresholds</h4>
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <Label htmlFor="responseTimeThreshold">Response Time (ms)</Label>
+                  <Input
+                    id="responseTimeThreshold"
+                    type="number"
+                    value={config.responseTimeThreshold}
+                    onChange={(e) => setConfig(prev => ({ ...prev, responseTimeThreshold: parseInt(e.target.value) || 1000 }))}
+                    min="100"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="throughputThreshold">Throughput (req/sec)</Label>
+                  <Input
+                    id="throughputThreshold"
+                    type="number"
+                    value={config.throughputThreshold}
+                    onChange={(e) => setConfig(prev => ({ ...prev, throughputThreshold: parseInt(e.target.value) || 1 }))}
+                    min="1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="errorRateThreshold">Error Rate (%)</Label>
+                  <Input
+                    id="errorRateThreshold"
+                    type="number"
+                    value={config.errorRateThreshold}
+                    onChange={(e) => setConfig(prev => ({ ...prev, errorRateThreshold: parseInt(e.target.value) || 1 }))}
+                    min="0"
+                    max="100"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <h4 className="text-sm font-medium">Connection Settings</h4>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="connectionTimeout">Connection Timeout (ms)</Label>
+                  <Input
+                    id="connectionTimeout"
+                    type="number"
+                    value={config.connectionTimeout}
+                    onChange={(e) => setConfig(prev => ({ ...prev, connectionTimeout: parseInt(e.target.value) || 1000 }))}
+                    min="1000"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="responseTimeout">Response Timeout (ms)</Label>
+                  <Input
+                    id="responseTimeout"
+                    type="number"
+                    value={config.responseTimeout}
+                    onChange={(e) => setConfig(prev => ({ ...prev, responseTimeout: parseInt(e.target.value) || 1000 }))}
+                    min="1000"
+                  />
+                </div>
               </div>
             </div>
 
@@ -849,6 +958,8 @@ CSV Config: ${config.generateCsvConfig ? 'Enabled' : 'Disabled'}</stringProp>
                 </Select>
               </div>
 
+               
+              <h4 className="text-sm font-medium">JMeter Configuration</h4>
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex items-center space-x-2">
                   <Switch
@@ -856,9 +967,7 @@ CSV Config: ${config.generateCsvConfig ? 'Enabled' : 'Disabled'}</stringProp>
                     checked={config.addAssertions}
                     onCheckedChange={(checked) => setConfig(prev => ({ ...prev, addAssertions: checked }))}
                   />
-                  <Label htmlFor="addAssertions" className="text-sm">
-                    HTTP Response Assertions (2xx)
-                  </Label>
+                  <Label htmlFor="addAssertions">Add Response Assertions</Label>
                 </div>
 
                 <div className="flex items-center space-x-2">
@@ -867,22 +976,83 @@ CSV Config: ${config.generateCsvConfig ? 'Enabled' : 'Disabled'}</stringProp>
                     checked={config.addCorrelation}
                     onCheckedChange={(checked) => setConfig(prev => ({ ...prev, addCorrelation: checked }))}
                   />
-                  <Label htmlFor="addCorrelation" className="text-sm">
-                    JSON Extractors for IDs
-                  </Label>
+                  <Label htmlFor="addCorrelation">Enable Dynamic Correlation</Label>
                 </div>
 
-                <div className="flex items-center space-x-2 col-span-2">
+                <div className="flex items-center space-x-2">
                   <Switch
                     id="generateCsvConfig"
                     checked={config.generateCsvConfig}
                     onCheckedChange={(checked) => setConfig(prev => ({ ...prev, generateCsvConfig: checked }))}
                   />
-                  <Label htmlFor="generateCsvConfig" className="text-sm">
-                    Generate CSV Data Set Config
-                  </Label>
+                  <Label htmlFor="generateCsvConfig">Generate CSV Data Config</Label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="followRedirects"
+                    checked={config.followRedirects}
+                    onCheckedChange={(checked) => setConfig(prev => ({ ...prev, followRedirects: checked }))}
+                  />
+                  <Label htmlFor="followRedirects">Follow Redirects</Label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="useKeepAlive"
+                    checked={config.useKeepAlive}
+                    onCheckedChange={(checked) => setConfig(prev => ({ ...prev, useKeepAlive: checked }))}
+                  />
+                  <Label htmlFor="useKeepAlive">Use Keep-Alive</Label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="enableReporting"
+                    checked={config.enableReporting}
+                    onCheckedChange={(checked) => setConfig(prev => ({ ...prev, enableReporting: checked }))}
+                  />
+                  <Label htmlFor="enableReporting">Detailed Reporting</Label>
                 </div>
               </div>
+
+              <div>
+                <Label htmlFor="aiProvider">AI Provider</Label>
+                <Select value={aiProvider} onValueChange={(value: 'google' | 'openai') => setAiProvider(value)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="google">Google AI (Gemini)</SelectItem>
+                    <SelectItem value="openai">OpenAI (GPT)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="additionalPrompt">Additional Prompt Details</Label>
+                <Textarea
+                  id="additionalPrompt"
+                  placeholder="Enter any additional instructions or specific requirements for JMX generation..."
+                  value={additionalPrompt}
+                  onChange={(e) => setAdditionalPrompt(e.target.value)}
+                  rows={3}
+                  className="resize-none"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Optional: Add extra context or specific requirements for AI-generated JMX
+                </p>
+              </div>
+
+              <Button
+                onClick={handleGenerateJMeter}
+                disabled={!swaggerContent.trim() || isProcessing}
+                size="lg"
+                className="w-full"
+              >
+                <Zap className="mr-2 h-4 w-4" />
+                {isProcessing ? "Generating JMeter Test Plan..." : "Generate JMeter Test Plan"}
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -927,17 +1097,7 @@ CSV Config: ${config.generateCsvConfig ? 'Enabled' : 'Disabled'}</stringProp>
       </div>
 
       {/* Actions */}
-      <div className="flex flex-wrap gap-4 justify-center">
-        <Button 
-          onClick={handleGenerateJMeter}
-          disabled={!swaggerContent.trim() || isProcessing}
-          size="lg"
-          className="min-w-[200px]"
-        >
-          <Zap className="mr-2 h-4 w-4" />
-          {isProcessing ? "Generating..." : "Generate JMeter File"}
-        </Button>
-        
+      <div className="flex flex-wrap gap-4 justify-center">        
         {jmeterXml && (
           <Button 
             onClick={handleDownload}

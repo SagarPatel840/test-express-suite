@@ -15,6 +15,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 export const SwaggerTestGenerator = () => {
   const [swaggerContent, setSwaggerContent] = useState("");
+  const [additionalPrompt, setAdditionalPrompt] = useState("");
   const [testCases, setTestCases] = useState<string[][]>([]);
   const [postmanCollection, setPostmanCollection] = useState<any>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -76,7 +77,10 @@ export const SwaggerTestGenerator = () => {
       console.log(`Using AI provider: ${aiProvider}, calling function: ${functionName}`);
       
       const { data, error } = await supabase.functions.invoke(functionName, {
-        body: { swaggerSpec }
+        body: { 
+          swaggerSpec,
+          additionalPrompt: additionalPrompt.trim() || undefined
+        }
       });
 
       if (error) throw error;
@@ -200,6 +204,20 @@ export const SwaggerTestGenerator = () => {
             />
           </div>
 
+          <div>
+            <Label htmlFor="additionalPrompt">Additional Prompt Details</Label>
+            <Textarea
+              id="additionalPrompt"
+              value={additionalPrompt}
+              onChange={(e) => setAdditionalPrompt(e.target.value)}
+              placeholder="Enter any additional requirements or specifications for test case generation..."
+              className="min-h-[120px]"
+            />
+            <p className="text-sm text-muted-foreground mt-1">
+              These details will be combined with the AI prompt to customize test case generation according to your specific needs.
+            </p>
+          </div>
+
           <Button 
             onClick={generateTestCases} 
             disabled={isProcessing || !swaggerContent.trim()}
@@ -260,68 +278,64 @@ export const SwaggerTestGenerator = () => {
                 <TabsTrigger value="preview">UI Preview</TabsTrigger>
               </TabsList>
 
-              <TabsContent value="csv" className="mt-4 max-h-[70vh]">
-                <div className="border rounded-lg max-w-full h-[60vh] md:h-[65vh] lg:h-[70vh] overflow-hidden">
-                  <div className="h-full w-full overflow-x-auto overflow-y-auto overscroll-contain">
-                    <div className="min-w-max">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            {testCases?.[0]?.map((header, index) => (
-                              <TableHead key={index} className="whitespace-nowrap min-w-[120px] max-w-[200px]">{header}</TableHead>
+              <TabsContent value="csv" className="mt-4">
+                <div className="border rounded-lg">
+                  <ScrollArea className="h-96">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          {testCases?.[0]?.map((header, index) => (
+                            <TableHead key={index}>{header}</TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {testCases?.slice(1).map((row, rowIndex) => (
+                          <TableRow key={rowIndex}>
+                            {row.map((cell, cellIndex) => (
+                              <TableCell key={cellIndex} className="max-w-xs truncate">
+                                {cell}
+                              </TableCell>
                             ))}
                           </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {testCases?.slice(1).map((row, rowIndex) => (
-                            <TableRow key={rowIndex}>
-                              {row.map((cell, cellIndex) => (
-                                <TableCell key={cellIndex} className="align-top text-xs px-3 py-2 min-w-[120px] max-w-[200px]">
-                                  <div className="break-words whitespace-pre-wrap">{cell}</div>
-                                </TableCell>
-                              ))}
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </div>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
                 </div>
               </TabsContent>
 
-              <TabsContent value="postman" className="mt-4 max-h-[70vh]">
+              <TabsContent value="postman" className="mt-4">
                 <Textarea
                   value={postmanCollection ? JSON.stringify(postmanCollection, null, 2) : ''}
                   readOnly
-                  className="h-[60vh] md:h-[65vh] lg:h-[70vh] font-mono text-sm overflow-auto"
+                  className="min-h-[400px] font-mono text-sm"
                 />
               </TabsContent>
 
-              <TabsContent value="preview" className="mt-4 max-h-[70vh]">
-                <div className="h-[60vh] md:h-[65vh] lg:h-[70vh] overflow-y-auto">
-                  <div className="space-y-4">
-                    {testCases?.slice(1).map((row, index) => (
-                      <div key={index} className="border rounded-lg p-4">
-                        <div className="flex items-center justify-between mb-2">
-                          <h4 className="text-sm font-medium">{row[2]}</h4>
-                          <div className="flex gap-2">
-                            <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">
-                              {row[1]}
-                            </span>
-                            <span className={`text-xs px-2 py-1 rounded ${
-                              row[5] === 'Positive' ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
-                            }`}>
-                              {row[5]}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          <p><strong>Endpoint:</strong> {row[0]}</p>
-                          <p><strong>Expected:</strong> {row[4]}</p>
+              <TabsContent value="preview" className="mt-4">
+                <div className="space-y-4">
+                  {testCases?.slice(1).map((row, index) => (
+                    <div key={index} className="border rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-sm font-medium">{row[2]}</h4>
+                        <div className="flex gap-2">
+                          <span className="text-xs bg-primary/10 text-primary px-2 py-1 rounded">
+                            {row[1]}
+                          </span>
+                          <span className={`text-xs px-2 py-1 rounded ${
+                            row[5] === 'Positive' ? 'bg-success/10 text-success' : 'bg-destructive/10 text-destructive'
+                          }`}>
+                            {row[5]}
+                          </span>
                         </div>
                       </div>
-                    ))}
-                  </div>
+                      <div className="text-sm text-muted-foreground">
+                        <p><strong>Endpoint:</strong> {row[0]}</p>
+                        <p><strong>Expected:</strong> {row[4]}</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </TabsContent>
             </Tabs>
