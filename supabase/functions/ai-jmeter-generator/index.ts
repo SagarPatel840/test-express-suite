@@ -32,6 +32,7 @@ serve(async (req) => {
     console.log('Processing Swagger spec with AI-powered JMeter generation...');
     console.log('AI Provider:', aiProvider);
     console.log('Load Config:', loadConfig);
+    console.log('Additional Prompt Length:', additionalPrompt?.length || 0);
 
     // Parse swagger content if it's a string
     let parsedSwaggerSpec;
@@ -80,6 +81,9 @@ serve(async (req) => {
 
     console.log(`Found ${apiInfo.methods.length} API endpoints to analyze`);
 
+    // Build explicit endpoints list to enforce 1:1 sampler coverage
+    const endpointsList = apiInfo.methods.map((m: any) => `${m.method} ${m.path}`).join('\n');
+
     // Use the exact prompt provided by the user for Swagger JMX generation
     const jmxPrompt = `You are an expert in JMeter test plan generation.  
 Your task is to create a complete Apache JMeter (.jmx) file based on the provided Swagger (OpenAPI) specification.  
@@ -93,23 +97,31 @@ Your task is to create a complete Apache JMeter (.jmx) file based on the provide
 
 2. Create a JMeter Test Plan (.jmx) with the following:  
    - Thread Group with configurable threads, ramp-up, and loop count.  
-   - HTTP Request Samplers for every endpoint in Swagger.  
+   - HTTP Request Samplers for EVERY endpoint (one sampler per method+path).  
    - Group Samplers by API tag or path for better readability.  
-   - Add \`HTTP Header Manager\` with required headers such as \`Content-Type: application/json\`, \`Authorization\`, etc.  
-   - Add \`CSV Data Set Config\` to parameterize dynamic values like user IDs, emails, or tokens.  
-   - For request bodies, insert variables (e.g., \`\${variableName}\`) instead of hardcoded values.  
+   - Add `HTTP Header Manager` with required headers such as `Content-Type: application/json`, `Authorization`, etc.  
+   - Add `CSV Data Set Config` to parameterize dynamic values like user IDs, emails, or tokens.  
+   - For request bodies, insert variables (e.g., `${variableName}`) instead of hardcoded values.  
    - Add realistic sample test data for variables based on Swagger schema (strings, numbers, booleans, arrays).  
 
 3. Enhancements:  
    - Automatically handle path parameters with variables.  
    - Insert default test data where the Swagger schema does not provide examples.  
-   - Add \`JSON Extractor\` or \`Regular Expression Extractor\` for correlation of response values (e.g., auth token).  
+   - Add `JSON Extractor` or `Regular Expression Extractor` for correlation of response values (e.g., auth token).  
    - Ensure the JMX is well-formed XML and can be directly opened in JMeter without errors.  
+
+### STRICT COVERAGE CONSTRAINTS:
+- The number of HTTPSamplerProxy elements MUST equal ${apiInfo.methods.length}.
+- Create exactly ONE HTTPSamplerProxy per endpoint below. Do NOT group or combine endpoints.
+- Name each sampler as `METHOD PATH` exactly.
+
+### Endpoints to cover (${apiInfo.methods.length}):
+${endpointsList}
 
 ### Body Data Rules:  
 1. **Swagger-based JMX**  
    - For each request body defined in Swagger schemas:  
-     - Map schema fields to \`\${variableName}\` placeholders instead of hardcoded values.  
+     - Map schema fields to `${variableName}` placeholders instead of hardcoded values.  
      - Use CSV Data Set Config to supply values for those variables.  
      - If the schema has examples/defaults, use them as initial CSV values.  
      - Support JSON, XML, or form-data body formats depending on Swagger definition.  
@@ -117,9 +129,9 @@ Your task is to create a complete Apache JMeter (.jmx) file based on the provide
    Example for Swagger schema:  
    \`\`\`json
    {
-     "username": "\${username}",
-     "password": "\${password}",
-     "age": \${age}
+     "username": "${username}",
+     "password": "${password}",
+     "age": ${age}
    }
    \`\`\`
 
@@ -132,7 +144,7 @@ Your task is to create a complete Apache JMeter (.jmx) file based on the provide
 ### Output:  
 - Provide the final JMX file content as valid XML inside code block.  
 - Do not summarize, only return the JMX file.  
-- Ensure all nodes (\`TestPlan\`, \`ThreadGroup\`, \`HTTPSamplerProxy\`, etc.) follow correct JMeter XML structure.  
+- Ensure all nodes (`TestPlan`, `ThreadGroup`, `HTTPSamplerProxy`, etc.) follow correct JMeter XML structure.  
 
 ### Input:  
 Swagger/OpenAPI specification (YAML or JSON format) will be provided.  
@@ -151,6 +163,8 @@ ${JSON.stringify(parsedSwaggerSpec, null, 2)}
 - Ramp-up Time: ${loadConfig.rampUpTime} seconds
 - Duration: ${loadConfig.duration} seconds
 - Loop Count: ${loadConfig.loopCount}`;
+
+    let jmeterXmlFromAI = "";
 
     let jmeterXmlFromAI = "";
 
@@ -174,8 +188,8 @@ ${JSON.stringify(parsedSwaggerSpec, null, 2)}
 
         if (!response.ok) {
           const errorText = await response.text();
-          console.error('Google AI API error:', errorText);
-          throw new Error(`Google AI API error: ${response.statusText}`);
+          console.error('Google AI API error:', response.status, errorText);
+          throw new Error(`Google AI API error (${response.status}): ${response.statusText} - ${errorText}`);
         }
 
         const data = await response.json();
@@ -183,13 +197,27 @@ ${JSON.stringify(parsedSwaggerSpec, null, 2)}
         
         if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
           const aiText = data.candidates[0].content.parts[0].text;
+          console.log('Google AI raw response length:', aiText.length);
+          
           // Extract XML content from code blocks if present
-          const xmlMatch = aiText.match(/```(?:xml)?\s*([\s\S]*?)\s*```/) || aiText.match(/<\?xml[\s\S]*<\/jmeterTestPlan>/);
+          const xmlMatch = aiText.match(/```(?:xml|jmx)?\s*([\s\S]*?)\s*```/) || 
+                          aiText.match(/<\?xml[\s\S]*?<\/jmeterTestPlan>/) ||
+                          aiText.match(/<jmeterTestPlan[\s\S]*?<\/jmeterTestPlan>/);
+          
           if (xmlMatch) {
             jmeterXmlFromAI = xmlMatch[1] || xmlMatch[0];
+            console.log('Extracted JMX from code block/XML pattern');
+          } else if (aiText.includes('<jmeterTestPlan') || aiText.includes('<?xml')) {
+            // If it contains JMeter XML tags but doesn't match patterns, use as-is
+            jmeterXmlFromAI = aiText;
+            console.log('Using full AI response as JMX (contains XML tags)');
           } else {
             jmeterXmlFromAI = aiText;
+            console.log('Using full AI response as JMX (fallback)');
           }
+          
+          console.log('Final JMX from AI length:', jmeterXmlFromAI.length);
+          console.log('JMX contains jmeterTestPlan tag:', jmeterXmlFromAI.includes('<jmeterTestPlan'));
         }
       } catch (error) {
         console.error('Google AI API call failed:', error);
@@ -216,8 +244,8 @@ ${JSON.stringify(parsedSwaggerSpec, null, 2)}
 
         if (!response.ok) {
           const errorText = await response.text();
-          console.error('OpenAI API error:', errorText);
-          throw new Error(`OpenAI API error: ${response.statusText}`);
+          console.error('OpenAI API error:', response.status, errorText);
+          throw new Error(`OpenAI API error (${response.status}): ${response.statusText} - ${errorText}`);
         }
 
         const data = await response.json();
@@ -239,12 +267,21 @@ ${JSON.stringify(parsedSwaggerSpec, null, 2)}
 
     // Use AI-generated JMeter XML if available, otherwise use fallback generation
     let finalJmeterXml: string;
+    const hasValidAIContent = jmeterXmlFromAI && 
+      (jmeterXmlFromAI.includes('<jmeterTestPlan') || jmeterXmlFromAI.includes('<?xml'));
     
-    if (jmeterXmlFromAI && jmeterXmlFromAI.includes('<jmeterTestPlan')) {
-      console.log('Using AI-generated JMeter XML');
+    console.log('AI content available:', !!jmeterXmlFromAI);
+    console.log('AI content length:', jmeterXmlFromAI?.length || 0);
+    console.log('Has valid JMX structure:', hasValidAIContent);
+    
+    if (hasValidAIContent) {
+      console.log('✅ Using AI-generated JMeter XML from', aiProvider);
       finalJmeterXml = enhanceJMeterXML(jmeterXmlFromAI, loadConfig);
     } else {
-      console.log('Using fallback JMeter XML generation');
+      console.log('❌ Using fallback JMeter XML generation - AI content invalid or empty');
+      if (jmeterXmlFromAI) {
+        console.log('AI response preview (first 200 chars):', jmeterXmlFromAI.substring(0, 200));
+      }
       // Fallback: generate basic JMeter XML locally
       finalJmeterXml = generateJMeterXML(parsedSwaggerSpec, loadConfig, { 
         scenarios: [{ name: "API Load Test", description: "Basic load test for all endpoints", priority: "high" }],
@@ -263,8 +300,10 @@ ${JSON.stringify(parsedSwaggerSpec, null, 2)}
       metadata: {
         provider: aiProvider === 'google' ? 'Google AI Studio' : 'OpenAI',
         endpoints: apiInfo.methods.length,
-        generatedByAI: jmeterXmlFromAI && jmeterXmlFromAI.includes('<jmeterTestPlan'),
-        testPlanName: loadConfig.testPlanName
+        generatedByAI: hasValidAIContent,
+        testPlanName: loadConfig.testPlanName,
+        aiUsed: !!jmeterXmlFromAI,
+        aiContentLength: jmeterXmlFromAI?.length || 0
       }
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
