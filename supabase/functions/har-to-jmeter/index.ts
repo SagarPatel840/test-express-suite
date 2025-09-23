@@ -134,11 +134,21 @@ ${JSON.stringify(harData, null, 2)}`;
       const azureEndpoint = Deno.env.get('AZURE_OPENAI_ENDPOINT');
       const azureDeployment = Deno.env.get('AZURE_OPENAI_DEPLOYMENT_NAME') || 'gpt-4';
       
+      console.log('Azure OpenAI Configuration:', {
+        hasApiKey: !!azureApiKey,
+        hasEndpoint: !!azureEndpoint,
+        deployment: azureDeployment,
+        endpoint: azureEndpoint
+      });
+      
       if (!azureApiKey || !azureEndpoint) {
         throw new Error("Azure OpenAI API key or endpoint not configured");
       }
       
-      jmxGenerationResponse = await fetch(`${azureEndpoint}/openai/deployments/${azureDeployment}/chat/completions?api-version=2024-08-01-preview`, {
+      // Ensure endpoint doesn't have trailing slash
+      const cleanEndpoint = azureEndpoint.replace(/\/$/, '');
+      
+      jmxGenerationResponse = await fetch(`${cleanEndpoint}/openai/deployments/${azureDeployment}/chat/completions?api-version=2024-08-01-preview`, {
         method: 'POST',
         headers: {
           'api-key': azureApiKey,
