@@ -76,7 +76,7 @@ export const HarToJMeter = () => {
     addCorrelation: true,
     generateCsvConfig: false
   });
-  const [aiProvider, setAiProvider] = useState<'google' | 'openai'>('google');
+  const [aiProvider, setAiProvider] = useState<'google' | 'openai' | 'azure'>('google');
   const { toast } = useToast();
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -482,13 +482,14 @@ export const HarToJMeter = () => {
 
               <div>
                 <Label htmlFor="aiProvider">AI Provider</Label>
-                <Select value={aiProvider} onValueChange={(value: 'google' | 'openai') => setAiProvider(value)}>
+                <Select value={aiProvider} onValueChange={(value: 'google' | 'openai' | 'azure') => setAiProvider(value)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="google">Google AI (Gemini)</SelectItem>
                     <SelectItem value="openai">OpenAI (GPT)</SelectItem>
+                    <SelectItem value="azure">Azure OpenAI</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

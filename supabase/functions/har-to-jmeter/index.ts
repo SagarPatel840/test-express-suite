@@ -129,7 +129,31 @@ ${JSON.stringify(harData, null, 2)}`;
     let providerUsed = aiProvider;
     let jmxGenerationResponse;
     
-    if (providerUsed === 'google') {
+    if (providerUsed === 'azure') {
+      const azureApiKey = Deno.env.get('AZURE_OPENAI_API_KEY');
+      const azureEndpoint = Deno.env.get('AZURE_OPENAI_ENDPOINT');
+      const azureDeployment = Deno.env.get('AZURE_OPENAI_DEPLOYMENT_NAME') || 'gpt-4';
+      
+      if (!azureApiKey || !azureEndpoint) {
+        throw new Error("Azure OpenAI API key or endpoint not configured");
+      }
+      
+      jmxGenerationResponse = await fetch(`${azureEndpoint}/openai/deployments/${azureDeployment}/chat/completions?api-version=2024-08-01-preview`, {
+        method: 'POST',
+        headers: {
+          'api-key': azureApiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          messages: [
+            { role: 'system', content: 'You are an expert JMeter test plan generator. Generate only valid JMeter XML files based on HAR file data.' },
+            { role: 'user', content: jmxPrompt }
+          ],
+          max_tokens: 8000,
+          temperature: 0.1,
+        }),
+      });
+    } else if (providerUsed === 'google') {
       const googleAIApiKey = Deno.env.get('GOOGLE_AI_API_KEY');
       if (!googleAIApiKey) {
         throw new Error("Google AI API key not configured");
@@ -177,8 +201,37 @@ ${JSON.stringify(harData, null, 2)}`;
         const errorText = await jmxGenerationResponse.text();
         console.error(`${providerUsed} API error:`, jmxGenerationResponse.status, errorText);
 
-        // Fallback: if OpenAI failed and Google key exists, try Google
-        if (providerUsed !== 'google') {
+        // Fallback: if current provider failed, try alternatives
+        if (providerUsed === 'azure') {
+          // Try OpenAI as fallback
+          if (openAIApiKey) {
+            console.log('Falling back to OpenAI for JMX generation...');
+            jmxGenerationResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${openAIApiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: 'gpt-5-2025-08-07',
+                messages: [
+                  { role: 'system', content: 'You are an expert JMeter test plan generator. Generate only valid JMeter XML files based on HAR file data.' },
+                  { role: 'user', content: jmxPrompt }
+                ],
+                max_completion_tokens: 8000,
+              }),
+            });
+            providerUsed = 'openai';
+
+            if (!jmxGenerationResponse.ok) {
+              const fallbackErr = await jmxGenerationResponse.text();
+              console.error('OpenAI fallback error:', fallbackErr);
+              throw new Error(`${providerUsed} API error: ${jmxGenerationResponse.statusText}`);
+            }
+          } else {
+            throw new Error(`${providerUsed} API error: ${jmxGenerationResponse.statusText}`);
+          }
+        } else if (providerUsed !== 'google') {
           const googleAIApiKey = Deno.env.get('GOOGLE_AI_API_KEY');
           if (googleAIApiKey) {
             console.log('Falling back to Google AI for JMX generation...');
@@ -219,7 +272,7 @@ ${JSON.stringify(harData, null, 2)}`;
           }
         }
       } else {
-        // OpenAI
+        // OpenAI and Azure OpenAI
         if (jmxData.choices?.[0]?.message?.content) {
           const aiText = jmxData.choices[0].message.content;
           // Extract XML content from code blocks if present
@@ -254,7 +307,7 @@ ${JSON.stringify(harData, null, 2)}`;
     return new Response(JSON.stringify({ 
       jmxContent,
       metadata: {
-        provider: providerUsed === 'google' ? 'Google AI Studio' : 'OpenAI',
+        provider: providerUsed === 'google' ? 'Google AI Studio' : providerUsed === 'azure' ? 'Azure OpenAI' : 'OpenAI',
         generatedByAI: true,
         testPlanName: testPlanName
       },
